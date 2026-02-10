@@ -64,7 +64,7 @@ runtime.registerOrchestration('Pipeline', function* (ctx, input) {
 
 ### Fan-Out / Fan-In
 
-Run multiple tasks in parallel and wait for all to complete:
+Run multiple tasks in parallel and wait for all to complete. `ctx.all()` supports all task types — activities, timers, waits, and sub-orchestrations:
 
 ```javascript
 runtime.registerOrchestration('FanOut', function* (ctx, input) {
@@ -76,9 +76,24 @@ runtime.registerOrchestration('FanOut', function* (ctx, input) {
 });
 ```
 
+Mixed task types in `ctx.all()`:
+
+```javascript
+runtime.registerOrchestration('MixedAll', function* (ctx, input) {
+  const [actResult, _, eventData] = yield ctx.all([
+    ctx.scheduleActivity('Work', input),
+    ctx.scheduleTimer(1000),           // timers return { ok: null }
+    ctx.waitForEvent('approval'),      // waits return { ok: eventData }
+  ]);
+  return actResult;
+});
+```
+
+> **Note:** Nesting `ctx.all()` or `ctx.race()` inside each other is not supported — the runtime will reject it.
+
 ### Race / Select
 
-Wait for the first of two tasks to complete:
+Wait for the first of two tasks to complete. `ctx.race()` supports all task types:
 
 ```javascript
 runtime.registerOrchestration('RaceExample', function* (ctx, input) {
@@ -94,6 +109,8 @@ runtime.registerOrchestration('RaceExample', function* (ctx, input) {
   }
 });
 ```
+
+`ctx.race()` supports exactly 2 tasks (maps to Rust `select2`). Nesting `ctx.all()` or `ctx.race()` inside each other is not supported.
 
 ### Durable Timers
 

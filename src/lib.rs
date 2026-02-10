@@ -30,3 +30,10 @@ pub fn activity_trace_log(token: String, level: String, message: String) {
 pub fn orchestration_trace_log(instance_id: String, level: String, message: String) {
     handlers::orchestration_trace(&instance_id, &level, &message);
 }
+
+/// Check if an activity's cancellation token has been triggered.
+/// Returns true if the activity has been cancelled (e.g., due to losing a race/select).
+#[napi_derive::napi]
+pub fn activity_is_cancelled(token: String) -> bool {
+    handlers::activity_is_cancelled(&token)
+}

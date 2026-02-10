@@ -11,6 +11,11 @@ export interface JsRuntimeOptions {
   workerConcurrency?: number
   /** Dispatcher poll interval in ms (default: 100) */
   dispatcherPollIntervalMs?: number
+  /**
+   * Worker lock timeout in ms (default: 30000). Controls how often the activity
+   * manager renews locks, which affects cancellation detection speed.
+   */
+  workerLockTimeoutMs?: number
 }
 /** Orchestration status returned to JS. */
 export interface JsOrchestrationStatus {
@@ -103,6 +108,11 @@ export declare function activityTraceLog(token: string, level: string, message: 
  * and includes all structured fields (instance_id, orchestration_name, etc.)
  */
 export declare function orchestrationTraceLog(instanceId: string, level: string, message: string): void
+/**
+ * Check if an activity's cancellation token has been triggered.
+ * Returns true if the activity has been cancelled (e.g., due to losing a race/select).
+ */
+export declare function activityIsCancelled(token: string): boolean
 /** Wraps duroxide's Client for use from JavaScript. */
 export declare class JsClient {
   constructor(provider: JsSqliteProvider)

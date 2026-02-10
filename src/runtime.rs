@@ -21,6 +21,9 @@ pub struct JsRuntimeOptions {
     pub worker_concurrency: Option<i32>,
     /// Dispatcher poll interval in ms (default: 100)
     pub dispatcher_poll_interval_ms: Option<i64>,
+    /// Worker lock timeout in ms (default: 30000). Controls how often the activity
+    /// manager renews locks, which affects cancellation detection speed.
+    pub worker_lock_timeout_ms: Option<i64>,
 }
 
 /// Builder for the duroxide runtime, wrapping registration and startup.
@@ -169,6 +172,9 @@ impl JsRuntime {
             if let Some(ms) = opts.dispatcher_poll_interval_ms {
                 rt_options.dispatcher_min_poll_interval = Duration::from_millis(ms as u64);
             }
+            if let Some(ms) = opts.worker_lock_timeout_ms {
+                rt_options.worker_lock_timeout = Duration::from_millis(ms as u64);
+            }
         }
 
         let provider = self.provider.clone();
@@ -185,6 +191,9 @@ impl JsRuntime {
     }
 
     /// Shutdown the runtime gracefully.
+    ///
+    /// # Safety
+    /// Must not be called concurrently from multiple threads.
     #[napi]
     pub async unsafe fn shutdown(&mut self, timeout_ms: Option<i64>) -> Result<()> {
         if let Some(rt) = self.inner.take() {

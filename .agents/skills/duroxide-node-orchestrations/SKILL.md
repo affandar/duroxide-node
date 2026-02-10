@@ -75,15 +75,16 @@ function* (ctx, input) {
 ### Composition (MUST yield)
 
 ```javascript
-// Fan-out / fan-in — wait for ALL tasks
+// Fan-out / fan-in — wait for ALL tasks (supports all task types)
 const results = yield ctx.all([
   ctx.scheduleActivity('TaskA', inputA),
   ctx.scheduleActivity('TaskB', inputB),
-  ctx.scheduleActivity('TaskC', inputC),
+  ctx.scheduleTimer(5000),                    // timers work too
+  ctx.waitForEvent('approval'),               // waits work too
 ]);
-// results = [resultA, resultB, resultC]
+// results = [resultA, resultB, { ok: null }, { ok: eventData }]
 
-// Race — wait for FIRST of 2 tasks
+// Race — wait for FIRST of 2 tasks (supports all task types)
 const winner = yield ctx.race(
   ctx.scheduleActivity('FastService', input),
   ctx.scheduleTimer(5000)
@@ -91,13 +92,24 @@ const winner = yield ctx.race(
 // winner = { index: 0|1, value: ... }
 ```
 
-**`ctx.race()` supports exactly 2 tasks** (maps to Rust `select2`). Use nesting for more:
+**`ctx.race()` supports exactly 2 tasks** (maps to Rust `select2`). Nesting `all()`/`race()` inside `all()` or `race()` is **not supported** — the runtime rejects it.
+
+### Cooperative Activity Cancellation
+
 ```javascript
-const winner = yield ctx.race(
-  ctx.scheduleActivity('A', input),
-  ctx.scheduleActivity('B', input)  // only 2
-);
+runtime.registerActivity('LongTask', async (ctx, input) => {
+  for (let i = 0; i < 1000; i++) {
+    if (ctx.isCancelled()) {
+      ctx.traceInfo('cancelled, cleaning up');
+      return { status: 'cancelled' };
+    }
+    await doChunk(i);
+  }
+  return { status: 'done' };
+});
 ```
+
+`ctx.isCancelled()` checks whether the orchestration no longer needs the activity result (e.g., lost a race). Detection latency is `workerLockTimeoutMs / 2` (default 30s → ~15s).
 
 ### Tracing (NO yield — fire-and-forget)
 
@@ -121,6 +133,12 @@ runtime.registerActivity('MyActivity', async (ctx, input) => {
   ctx.orchestrationVersion;
   ctx.activityName;
   ctx.workerId;
+
+  // Cooperative cancellation (check if orchestration no longer needs this result)
+  if (ctx.isCancelled()) {
+    ctx.traceInfo('cancelled');
+    return { status: 'cancelled' };
+  }
 
   // Tracing (delegates to Rust ActivityContext — full structured fields)
   ctx.traceInfo(`processing ${input.id}`);
@@ -297,18 +315,21 @@ describe('My Feature', () => {
 ### Test Commands
 
 ```bash
-npm test                    # SQLite e2e (17 tests)
-npm run test:pg             # PostgreSQL (13 tests, needs DATABASE_URL in .env)
+npm test                    # PostgreSQL e2e (23 tests + 1 SQLite smoketest)
+npm run test:races          # Race/join composition tests (7 tests)
+npm run test:admin          # Admin API tests (14 tests)
 npm run test:scenarios      # Scenario tests (6 tests)
-npm run test:all            # Everything
+npm run test:all            # Everything (50 tests)
 ```
 
 ### Test Tips
 
-- Use `SqliteProvider.inMemory()` for fast isolated tests
+- Use `SqliteProvider.inMemory()` for fast isolated tests (SQLite smoketest only)
+- All PG tests need `DATABASE_URL` in `.env` (loaded by `dotenv`)
+- Each test file uses a separate PG schema for isolation
 - Use short `runtime.shutdown(100)` timeout — it waits the full duration
 - Set `RUST_LOG=info` to see traces in test output
-- For PG tests, put `DATABASE_URL` in `.env` (loaded by `dotenv`)
+- Use `workerLockTimeoutMs: 2000` in tests needing fast activity cancellation detection
 
 ## Client API
 

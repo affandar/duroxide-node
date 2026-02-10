@@ -16,9 +16,10 @@
     "build:debug": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "node --test __tests__/e2e.test.js",
+    "test:races": "node --test __tests__/races.test.js",
     "test:admin": "node --test __tests__/admin_api.test.js",
     "test:scenarios": "node --test __tests__/scenarios/*.test.js",
-    "test:all": "node --test __tests__/e2e.test.js __tests__/admin_api.test.js __tests__/scenarios/*.test.js",
+    "test:all": "node --test __tests__/e2e.test.js __tests__/races.test.js __tests__/admin_api.test.js __tests__/scenarios/*.test.js",
     "version": "napi version"
   },
   "devDependencies": {

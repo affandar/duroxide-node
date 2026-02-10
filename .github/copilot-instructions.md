@@ -16,15 +16,16 @@ Key docs: `docs/architecture.md`, `docs/user-guide.md`.
 lib/duroxide.js          ← JS wrapper: generator driver, OrchestrationContext, ActivityContext
 src/lib.rs               ← napi entry point, trace functions
 src/handlers.rs          ← Core interop: orchestration handler loop, activity invocation,
-                           global context maps, select/race/join
+                           global context maps, select/race/join, activity cancellation
 src/types.rs             ← ScheduledTask enum (activity, timer, wait, orchestration, etc.)
 src/runtime.rs           ← JsRuntime (wraps duroxide::Runtime)
-src/client.rs            ← JsClient (wraps duroxide::Client)
+src/client.rs            ← JsClient (wraps duroxide::Client, including admin/management APIs)
 src/provider.rs          ← JsSqliteProvider
 src/pg_provider.rs       ← JsPostgresProvider
-__tests__/e2e.test.js    ← SQLite e2e tests (17 tests)
-__tests__/e2e_pg.test.js ← PostgreSQL e2e tests (13 tests)
-__tests__/scenarios/     ← Scenario tests modeling real-world patterns (toygres)
+__tests__/e2e.test.js    ← PostgreSQL e2e tests (23 tests + 1 SQLite smoketest)
+__tests__/races.test.js  ← ctx.all() and ctx.race() with mixed task types + cancellation (7 tests)
+__tests__/admin_api.test.js ← Admin/management API tests (14 tests)
+__tests__/scenarios/     ← Scenario tests modeling real-world patterns (toygres, 6 tests)
 ```
 
 ## ⚠️ Critical: Yield vs Await
@@ -70,10 +71,11 @@ npx napi build --platform              # Debug build
 npx napi build --platform --release    # Release build
 
 # Tests
-npm test                               # SQLite e2e (17 tests)
-npm run test:pg                        # PostgreSQL e2e (13 tests, needs DATABASE_URL in .env)
-npm run test:scenarios                 # Scenario tests (6 tests)
-npm run test:all                       # Everything
+npm test                               # PostgreSQL e2e (23 tests + 1 SQLite smoketest, needs DATABASE_URL in .env)
+npm run test:races                     # Race/join composition tests (7 tests, needs DATABASE_URL)
+npm run test:admin                     # Admin API tests (14 tests, needs DATABASE_URL)
+npm run test:scenarios                 # Scenario tests (6 tests, needs DATABASE_URL)
+npm run test:all                       # Everything (50 tests)
 
 # Lint the Rust side
 cargo clippy --all-targets
@@ -132,6 +134,12 @@ if (provider._type === 'postgres') {
 
 **select/race** uses `make_select_future()` which returns `Pin<Box<dyn Future<Output = String>>>` to handle all task types uniformly.
 
+**join/all** uses `make_join_future()` — similar to `make_select_future()` but normalizes output to `{ok:v}/{err:e}` JSON. Supports all task types: activities, timers, waits, sub-orchestrations (all variants).
+
+**Nested join/select rejection** — `Join` and `Select` handlers reject nested `Join`/`Select` tasks to avoid recursive async issues.
+
+**Activity cancellation** — `ctx.isCancelled()` checks the Rust `CancellationToken` via `ACTIVITY_CTXS` map. Cancellation is detected via lock renewal failure (latency = `workerLockTimeoutMs / 2`).
+
 ## Determinism Rules
 
 Orchestration generators **must be deterministic** (same rules as Rust duroxide):
@@ -152,6 +160,8 @@ This forces all transitive deps (duroxide-pg) to use the local duroxide.
 
 ## Adding Features
 
+**After adding features**: update `docs/user-guide.md`, relevant skills in `.agents/skills/`, and the ScheduledTask table above.
+
 **New ScheduledTask type:**
 1. Add variant to `ScheduledTask` enum in `src/types.rs`
 2. Add execution branch in `execute_task()` in `src/handlers.rs`
@@ -167,8 +177,11 @@ This forces all transitive deps (duroxide-pg) to use the local duroxide.
 ## Limitations
 
 - `ctx.race()` supports exactly 2 tasks (maps to Rust `select2`)
+- `ctx.all()` supports all task types: activities, timers, waits, sub-orchestrations (all variants). Nested `all()`/`race()` is rejected.
+- `ctx.race()` supports all task types. Nested `all()`/`race()` is rejected.
 - All JS callbacks run on the Node.js main thread (single-threaded)
 - No `async function*` generators — breaks replay model
 - SQLite may hit "database is locked" under concurrency (retried automatically)
 - `Runtime.shutdown(timeoutMs)` waits the full timeout (no short-circuit)
 - Platform-specific `.node` binary — cross-platform needs per-platform builds
+- Activity cancellation detection latency depends on `workerLockTimeoutMs` (default 30s → ~15s detection)

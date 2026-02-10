@@ -33,6 +33,12 @@ impl Drop for ActivityCtxGuard {
     }
 }
 
+/// Called from JS to check if an activity has been cancelled.
+pub fn activity_is_cancelled(token: &str) -> bool {
+    let map = ACTIVITY_CTXS.lock().unwrap();
+    map.get(token).is_some_and(|ctx| ctx.is_cancelled())
+}
+
 /// Called from JS to trace through the Rust ActivityContext.
 pub fn activity_trace(token: &str, level: &str, message: &str) {
     let map = ACTIVITY_CTXS.lock().unwrap();
@@ -87,7 +93,7 @@ impl Drop for OrchestrationInvokeGuard {
         };
 
         let dispose_fn = self.dispose_fn.clone();
-        let _ = tokio::task::block_in_place(|| {
+        tokio::task::block_in_place(|| {
             handle.block_on(async {
                 let _: Result<String, _> = dispose_fn.call_async::<String>(gen_id.to_string()).await;
             })
@@ -231,7 +237,7 @@ impl JsOrchestrationHandler {
     #[allow(dead_code)]
     fn call_dispose_blocking(&self, gen_id: u64) {
         let dispose_fn = self.dispose_fn.clone();
-        let _ = tokio::task::block_in_place(|| {
+        tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let _: Result<String, _> = dispose_fn
                     .call_async::<String>(gen_id.to_string())
@@ -346,29 +352,33 @@ impl JsOrchestrationHandler {
                 }
             }
             ScheduledTask::Join { tasks } => {
-                let mut futures = Vec::new();
-                for t in tasks {
+                // Reject nested join/select — recursive async requires Pin<Box> gymnastics
+                // and nested composition is not a meaningful pattern.
+                for t in &tasks {
                     match t {
-                        ScheduledTask::Activity { name, input } => {
-                            futures.push(ctx.schedule_activity(&name, input));
-                        }
-                        ScheduledTask::SubOrchestration { name, input } => {
-                            futures.push(ctx.schedule_sub_orchestration(&name, input));
-                        }
-                        _ => {
+                        ScheduledTask::Join { .. } | ScheduledTask::Select { .. } => {
                             return TaskResult::Err(
-                                "join only supports activity and sub-orchestration tasks"
-                                    .to_string(),
+                                "nested join/select inside join is not supported".to_string(),
                             );
                         }
+                        _ => {}
                     }
                 }
+
+                // Normalize all tasks to the same boxed future type so ctx.join() works
+                // regardless of whether they're activities, timers, waits, etc.
+                let futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send + '_>>> = tasks
+                    .into_iter()
+                    .map(|t| make_join_future(ctx, t))
+                    .collect();
+
                 let results = ctx.join(futures).await;
                 let json_results: Vec<serde_json::Value> = results
                     .into_iter()
-                    .map(|r| match r {
-                        Ok(v) => serde_json::json!({ "ok": v }),
-                        Err(e) => serde_json::json!({ "err": e }),
+                    .map(|v| {
+                        // Parse the inner JSON value (which make_join_future serialized)
+                        serde_json::from_str::<serde_json::Value>(&v)
+                            .unwrap_or(serde_json::Value::String(v))
                     })
                     .collect();
                 TaskResult::Ok(serde_json::to_string(&json_results).unwrap())
@@ -376,6 +386,17 @@ impl JsOrchestrationHandler {
             ScheduledTask::Select { tasks } => {
                 if tasks.len() != 2 {
                     return TaskResult::Err("select currently supports exactly 2 tasks".to_string());
+                }
+                // Reject nested join/select
+                for t in &tasks {
+                    match t {
+                        ScheduledTask::Join { .. } | ScheduledTask::Select { .. } => {
+                            return TaskResult::Err(
+                                "nested join/select inside select is not supported".to_string(),
+                            );
+                        }
+                        _ => {}
+                    }
                 }
                 let mut iter = tasks.into_iter();
                 let t1 = iter.next().unwrap();
@@ -407,7 +428,8 @@ enum TaskResult {
     Err(String),
 }
 
-/// Convert a ScheduledTask into a type-erased future for use in select.
+/// Convert a ScheduledTask into a type-erased future returning a raw string for use in select.
+/// Activity/sub-orch errors are flattened (Ok and Err both become the raw string value).
 fn make_select_future(
     ctx: &OrchestrationContext,
     task: ScheduledTask,
@@ -416,6 +438,15 @@ fn make_select_future(
         ScheduledTask::Activity { name, input } => {
             Box::pin(async move {
                 match ctx.schedule_activity(&name, input).await {
+                    Ok(v) => v,
+                    Err(e) => e,
+                }
+            })
+        }
+        ScheduledTask::ActivityWithRetry { name, input, retry } => {
+            Box::pin(async move {
+                let policy = convert_retry_policy(&retry);
+                match ctx.schedule_activity_with_retry(&name, input, policy).await {
                     Ok(v) => v,
                     Err(e) => e,
                 }
@@ -440,7 +471,103 @@ fn make_select_future(
                 }
             })
         }
+        ScheduledTask::SubOrchestrationWithId { name, instance_id, input } => {
+            Box::pin(async move {
+                match ctx.schedule_sub_orchestration_with_id(&name, instance_id, input).await {
+                    Ok(v) => v,
+                    Err(e) => e,
+                }
+            })
+        }
+        ScheduledTask::SubOrchestrationVersioned { name, version, input } => {
+            Box::pin(async move {
+                match ctx.schedule_sub_orchestration_versioned(&name, version, input).await {
+                    Ok(v) => v,
+                    Err(e) => e,
+                }
+            })
+        }
+        ScheduledTask::SubOrchestrationVersionedWithId { name, version, instance_id, input } => {
+            Box::pin(async move {
+                match ctx.schedule_sub_orchestration_versioned_with_id(&name, version, instance_id, input).await {
+                    Ok(v) => v,
+                    Err(e) => e,
+                }
+            })
+        }
         _ => Box::pin(async { "unsupported task in select".to_string() }),
+    }
+}
+
+/// Convert a ScheduledTask into a type-erased future returning `{ok:v}/{err:e}` JSON for use in join.
+/// Unlike make_select_future, this preserves the ok/err distinction so JS can tell success from failure.
+fn make_join_future(
+    ctx: &OrchestrationContext,
+    task: ScheduledTask,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send + '_>> {
+    match task {
+        ScheduledTask::Activity { name, input } => {
+            Box::pin(async move {
+                match ctx.schedule_activity(&name, input).await {
+                    Ok(v) => serde_json::json!({ "ok": v }).to_string(),
+                    Err(e) => serde_json::json!({ "err": e }).to_string(),
+                }
+            })
+        }
+        ScheduledTask::ActivityWithRetry { name, input, retry } => {
+            Box::pin(async move {
+                let policy = convert_retry_policy(&retry);
+                match ctx.schedule_activity_with_retry(&name, input, policy).await {
+                    Ok(v) => serde_json::json!({ "ok": v }).to_string(),
+                    Err(e) => serde_json::json!({ "err": e }).to_string(),
+                }
+            })
+        }
+        ScheduledTask::Timer { delay_ms } => {
+            Box::pin(async move {
+                ctx.schedule_timer(Duration::from_millis(delay_ms)).await;
+                serde_json::json!({ "ok": null }).to_string()
+            })
+        }
+        ScheduledTask::WaitEvent { name } => {
+            Box::pin(async move {
+                let data = ctx.schedule_wait(&name).await;
+                serde_json::json!({ "ok": data }).to_string()
+            })
+        }
+        ScheduledTask::SubOrchestration { name, input } => {
+            Box::pin(async move {
+                match ctx.schedule_sub_orchestration(&name, input).await {
+                    Ok(v) => serde_json::json!({ "ok": v }).to_string(),
+                    Err(e) => serde_json::json!({ "err": e }).to_string(),
+                }
+            })
+        }
+        ScheduledTask::SubOrchestrationWithId { name, instance_id, input } => {
+            Box::pin(async move {
+                match ctx.schedule_sub_orchestration_with_id(&name, instance_id, input).await {
+                    Ok(v) => serde_json::json!({ "ok": v }).to_string(),
+                    Err(e) => serde_json::json!({ "err": e }).to_string(),
+                }
+            })
+        }
+        ScheduledTask::SubOrchestrationVersioned { name, version, input } => {
+            Box::pin(async move {
+                match ctx.schedule_sub_orchestration_versioned(&name, version, input).await {
+                    Ok(v) => serde_json::json!({ "ok": v }).to_string(),
+                    Err(e) => serde_json::json!({ "err": e }).to_string(),
+                }
+            })
+        }
+        ScheduledTask::SubOrchestrationVersionedWithId { name, version, instance_id, input } => {
+            Box::pin(async move {
+                match ctx.schedule_sub_orchestration_versioned_with_id(&name, version, instance_id, input).await {
+                    Ok(v) => serde_json::json!({ "ok": v }).to_string(),
+                    Err(e) => serde_json::json!({ "err": e }).to_string(),
+                }
+            })
+        }
+        _ => Box::pin(async { serde_json::json!({ "err": "unsupported task in join" }).to_string() }),
     }
 }
 

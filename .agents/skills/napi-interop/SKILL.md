@@ -13,7 +13,7 @@ duroxide-node bridges Rust's duroxide runtime to Node.js via napi-rs. The intero
 
 | File | Role |
 |------|------|
-| `src/handlers.rs` | Core interop — orchestration handler loop, activity invocation, global context maps, select/race |
+| `src/handlers.rs` | Core interop — orchestration handler loop, activity invocation, global context maps, select/race/join, activity cancellation |
 | `src/types.rs` | `ScheduledTask` enum — the protocol between JS and Rust |
 | `src/lib.rs` | napi entry point, `#[napi]` trace functions |
 | `src/runtime.rs` | `JsRuntime` — wraps `duroxide::Runtime`, registers handlers |
@@ -175,7 +175,7 @@ pub enum ScheduledTask {
 1. Add variant to `ScheduledTask` in `src/types.rs` with correct `serde` attributes
 2. Add execution branch in `execute_task()` in `src/handlers.rs`
 3. If it should work in `select/race`, add branch in `make_select_future()`
-4. If it should work in `join/all`, add branch in the `Join` match arm
+4. If it should work in `join/all`, add branch in `make_join_future()`
 5. Add JS method to `OrchestrationContext` in `lib/duroxide.js` returning `{ type: '...', ... }`
 6. Add TypeScript type to `index.d.ts`
 7. Add test in `__tests__/e2e.test.js`
@@ -217,8 +217,34 @@ fn make_select_future(ctx: &OrchestrationContext, task: ScheduledTask)
     -> Pin<Box<dyn Future<Output = String> + Send + '_>>
 ```
 
-Supported in select: `Activity`, `Timer`, `WaitEvent`, `SubOrchestration`.
-Unsupported: `Join`, `Select` (nested), `ContinueAsNew`, `NewGuid`, `UtcNow`.
+Supported in select: `Activity`, `ActivityWithRetry`, `Timer`, `WaitEvent`, `SubOrchestration`, `SubOrchestrationWithId`, `SubOrchestrationVersioned`, `SubOrchestrationVersionedWithId`.
+Unsupported: `Join`, `Select` (nested — rejected with error), `ContinueAsNew`, `NewGuid`, `UtcNow`.
+
+## join/all Implementation
+
+`join` maps to Rust's `ctx.join()`, which requires `Vec<F>` with same output type. `make_join_future()` normalizes all task types to `Pin<Box<dyn Future<Output = String>>>` with `{ok:v}/{err:e}` JSON output:
+
+- **Activity**: `{ok: result}` or `{err: message}`
+- **Timer**: `{ok: null}` (timers return `()`)
+- **WaitEvent**: `{ok: eventData}`
+- **Sub-orchestration**: `{ok: result}` or `{err: message}`
+
+Supported in join: all same types as select.
+Unsupported: `Join`, `Select` (nested — rejected with error), `ContinueAsNew`, `NewGuid`, `UtcNow`.
+
+## Activity Cancellation
+
+`ctx.isCancelled()` checks the Rust `CancellationToken` via `ACTIVITY_CTXS` global map:
+
+```rust
+pub fn activity_is_cancelled(token: &str) -> bool {
+    ACTIVITY_CTXS.lock().unwrap().get(token)
+        .map(|ctx| ctx.is_cancelled())
+        .unwrap_or(false)
+}
+```
+
+Cancellation mechanism: lock renewal failure → `cancellation_token.cancel()`. Detection latency = `workerLockTimeoutMs / 2`.
 
 ## Common Pitfalls
 

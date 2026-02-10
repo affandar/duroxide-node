@@ -23,6 +23,7 @@ impl JsSqliteProvider {
             }
             std::fs::OpenOptions::new()
                 .create(true)
+                .truncate(false)
                 .write(true)
                 .open(file_path)
                 .map_err(|e| Error::from_reason(format!("Failed to create DB file: {e}")))?;
