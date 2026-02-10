@@ -22,7 +22,7 @@ src/runtime.rs           ← JsRuntime (wraps duroxide::Runtime)
 src/client.rs            ← JsClient (wraps duroxide::Client, including admin/management APIs)
 src/provider.rs          ← JsSqliteProvider
 src/pg_provider.rs       ← JsPostgresProvider
-__tests__/e2e.test.js    ← PostgreSQL e2e tests (23 tests + 1 SQLite smoketest)
+__tests__/e2e.test.js    ← PostgreSQL e2e tests (24 tests + 1 SQLite smoketest)
 __tests__/races.test.js  ← ctx.all() and ctx.race() with mixed task types + cancellation (7 tests)
 __tests__/admin_api.test.js ← Admin/management API tests (14 tests)
 __tests__/scenarios/     ← Scenario tests modeling real-world patterns (toygres, 6 tests)
@@ -71,11 +71,11 @@ npx napi build --platform              # Debug build
 npx napi build --platform --release    # Release build
 
 # Tests
-npm test                               # PostgreSQL e2e (23 tests + 1 SQLite smoketest, needs DATABASE_URL in .env)
+npm test                               # PostgreSQL e2e (24 tests + 1 SQLite smoketest, needs DATABASE_URL in .env)
 npm run test:races                     # Race/join composition tests (7 tests, needs DATABASE_URL)
 npm run test:admin                     # Admin API tests (14 tests, needs DATABASE_URL)
 npm run test:scenarios                 # Scenario tests (6 tests, needs DATABASE_URL)
-npm run test:all                       # Everything (50 tests)
+npm run test:all                       # Everything (52 tests)
 
 # Lint the Rust side
 cargo clippy --all-targets
@@ -139,6 +139,12 @@ if (provider._type === 'postgres') {
 **Nested join/select rejection** — `Join` and `Select` handlers reject nested `Join`/`Select` tasks to avoid recursive async issues.
 
 **Activity cancellation** — `ctx.isCancelled()` checks the Rust `CancellationToken` via `ACTIVITY_CTXS` map. Cancellation is detected via lock renewal failure (latency = `workerLockTimeoutMs / 2`).
+
+**Activity client access** — `ctx.getClient()` calls `activityGetClient(token)` napi function → looks up `ActivityContext` in `ACTIVITY_CTXS` map → calls `ctx.get_client()` → wraps result as `JsClient`. Activities can use this to start orchestrations, raise events, etc.
+
+**Metrics snapshot** — `runtime.metricsSnapshot()` returns a `JsMetricsSnapshot` with 17 counters (orch starts/completions/failures, activity results, dispatcher stats, provider errors). Returns `null` if observability is not enabled.
+
+**Observability options** — `JsRuntimeOptions` includes `logFormat`, `logLevel`, `serviceName`, `serviceVersion` which map to `duroxide::ObservabilityConfig`.
 
 ## Determinism Rules
 

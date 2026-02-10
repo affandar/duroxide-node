@@ -16,6 +16,14 @@ export interface JsRuntimeOptions {
    * manager renews locks, which affects cancellation detection speed.
    */
   workerLockTimeoutMs?: number
+  /** Log format: "json", "pretty", or "compact" (default) */
+  logFormat?: string
+  /** Log level filter: "info", "debug", "warn", "error", etc. */
+  logLevel?: string
+  /** Service name for identification in logs/metrics */
+  serviceName?: string
+  /** Optional service version */
+  serviceVersion?: string
 }
 /** Orchestration status returned to JS. */
 export interface JsOrchestrationStatus {
@@ -89,6 +97,26 @@ export interface JsInstanceFilter {
   completedBefore?: number
   limit?: number
 }
+/** Runtime metrics snapshot returned to JS. */
+export interface JsMetricsSnapshot {
+  orchStarts: number
+  orchCompletions: number
+  orchFailures: number
+  orchApplicationErrors: number
+  orchInfrastructureErrors: number
+  orchConfigurationErrors: number
+  orchPoison: number
+  activitySuccess: number
+  activityAppErrors: number
+  activityInfraErrors: number
+  activityConfigErrors: number
+  activityPoison: number
+  orchDispatcherItemsFetched: number
+  workerDispatcherItemsFetched: number
+  orchContinueAsNew: number
+  suborchestrationCalls: number
+  providerErrors: number
+}
 /** A single history event returned to JS. */
 export interface JsEvent {
   eventId: number
@@ -113,6 +141,8 @@ export declare function orchestrationTraceLog(instanceId: string, level: string,
  * Returns true if the activity has been cancelled (e.g., due to losing a race/select).
  */
 export declare function activityIsCancelled(token: string): boolean
+/** Get a Client from an activity context, allowing activities to start new orchestrations. */
+export declare function activityGetClient(token: string): JsClient | null
 /** Wraps duroxide's Client for use from JavaScript. */
 export declare class JsClient {
   constructor(provider: JsSqliteProvider)
@@ -210,6 +240,8 @@ export declare class JsRuntime {
    * This is async and takes &mut self. napi-rs requires async &mut methods to be marked unsafe.
    */
   start(): Promise<void>
+  /** Get a snapshot of runtime metrics. */
+  metricsSnapshot(): JsMetricsSnapshot | null
   /**
    * Shutdown the runtime gracefully.
    *

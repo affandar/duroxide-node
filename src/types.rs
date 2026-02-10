@@ -202,6 +202,29 @@ pub struct JsInstanceFilter {
     pub limit: Option<i64>,
 }
 
+/// Runtime metrics snapshot returned to JS.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct JsMetricsSnapshot {
+    pub orch_starts: i64,
+    pub orch_completions: i64,
+    pub orch_failures: i64,
+    pub orch_application_errors: i64,
+    pub orch_infrastructure_errors: i64,
+    pub orch_configuration_errors: i64,
+    pub orch_poison: i64,
+    pub activity_success: i64,
+    pub activity_app_errors: i64,
+    pub activity_infra_errors: i64,
+    pub activity_config_errors: i64,
+    pub activity_poison: i64,
+    pub orch_dispatcher_items_fetched: i64,
+    pub worker_dispatcher_items_fetched: i64,
+    pub orch_continue_as_new: i64,
+    pub suborchestration_calls: i64,
+    pub provider_errors: i64,
+}
+
 /// A single history event returned to JS.
 #[napi(object)]
 #[derive(Debug, Clone)]

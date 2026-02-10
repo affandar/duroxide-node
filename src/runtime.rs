@@ -7,9 +7,12 @@ use std::time::Duration;
 use duroxide::runtime::{self, OrchestrationRegistry};
 use duroxide::runtime::OrchestrationHandler;
 
+use duroxide::runtime::LogFormat;
+
 use crate::handlers::{JsActivityHandler, JsOrchestrationHandler};
 use crate::provider::JsSqliteProvider;
 use crate::pg_provider::JsPostgresProvider;
+use crate::types::JsMetricsSnapshot;
 
 /// Runtime options configurable from JavaScript.
 #[napi(object)]
@@ -24,6 +27,14 @@ pub struct JsRuntimeOptions {
     /// Worker lock timeout in ms (default: 30000). Controls how often the activity
     /// manager renews locks, which affects cancellation detection speed.
     pub worker_lock_timeout_ms: Option<i64>,
+    /// Log format: "json", "pretty", or "compact" (default)
+    pub log_format: Option<String>,
+    /// Log level filter: "info", "debug", "warn", "error", etc.
+    pub log_level: Option<String>,
+    /// Service name for identification in logs/metrics
+    pub service_name: Option<String>,
+    /// Optional service version
+    pub service_version: Option<String>,
 }
 
 /// Builder for the duroxide runtime, wrapping registration and startup.
@@ -175,6 +186,22 @@ impl JsRuntime {
             if let Some(ms) = opts.worker_lock_timeout_ms {
                 rt_options.worker_lock_timeout = Duration::from_millis(ms as u64);
             }
+            if let Some(ref fmt) = opts.log_format {
+                rt_options.observability.log_format = match fmt.as_str() {
+                    "json" => LogFormat::Json,
+                    "pretty" => LogFormat::Pretty,
+                    _ => LogFormat::Compact,
+                };
+            }
+            if let Some(ref level) = opts.log_level {
+                rt_options.observability.log_level = level.clone();
+            }
+            if let Some(ref name) = opts.service_name {
+                rt_options.observability.service_name = name.clone();
+            }
+            if let Some(ref ver) = opts.service_version {
+                rt_options.observability.service_version = Some(ver.clone());
+            }
         }
 
         let provider = self.provider.clone();
@@ -188,6 +215,30 @@ impl JsRuntime {
 
         self.inner = Some(rt);
         Ok(())
+    }
+
+    /// Get a snapshot of runtime metrics.
+    #[napi]
+    pub fn metrics_snapshot(&self) -> Option<JsMetricsSnapshot> {
+        self.inner.as_ref()?.metrics_snapshot().map(|m| JsMetricsSnapshot {
+            orch_starts: m.orch_starts as i64,
+            orch_completions: m.orch_completions as i64,
+            orch_failures: m.orch_failures as i64,
+            orch_application_errors: m.orch_application_errors as i64,
+            orch_infrastructure_errors: m.orch_infrastructure_errors as i64,
+            orch_configuration_errors: m.orch_configuration_errors as i64,
+            orch_poison: m.orch_poison as i64,
+            activity_success: m.activity_success as i64,
+            activity_app_errors: m.activity_app_errors as i64,
+            activity_infra_errors: m.activity_infra_errors as i64,
+            activity_config_errors: m.activity_config_errors as i64,
+            activity_poison: m.activity_poison as i64,
+            orch_dispatcher_items_fetched: m.orch_dispatcher_items_fetched as i64,
+            worker_dispatcher_items_fetched: m.worker_dispatcher_items_fetched as i64,
+            orch_continue_as_new: m.orch_continue_as_new as i64,
+            suborchestration_calls: m.suborchestration_calls as i64,
+            provider_errors: m.provider_errors as i64,
+        })
     }
 
     /// Shutdown the runtime gracefully.

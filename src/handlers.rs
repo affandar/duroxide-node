@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use duroxide::{ActivityContext, OrchestrationContext};
 
+use crate::client::JsClient;
 use crate::types::{GeneratorStepResult, RetryPolicyConfig, ScheduledTask};
 
 // ─── Shared Context Storage ─────────────────────────────────────
@@ -37,6 +38,12 @@ impl Drop for ActivityCtxGuard {
 pub fn activity_is_cancelled(token: &str) -> bool {
     let map = ACTIVITY_CTXS.lock().unwrap();
     map.get(token).is_some_and(|ctx| ctx.is_cancelled())
+}
+
+/// Called from JS to get a Client from the ActivityContext.
+pub fn activity_get_client(token: &str) -> Option<JsClient> {
+    let map = ACTIVITY_CTXS.lock().unwrap();
+    map.get(token).map(|ctx| JsClient::from_client(ctx.get_client()))
 }
 
 /// Called from JS to trace through the Rust ActivityContext.

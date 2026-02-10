@@ -358,13 +358,28 @@ const runtime = new Runtime(provider, {
   orchestrationConcurrency: 4,    // Max concurrent orchestration dispatches
   workerConcurrency: 8,           // Max concurrent activity workers
   dispatcherPollInterval: 100,    // Polling interval in ms
-  observability: {
-    logLevel: 'info',
-    serviceName: 'my-service',
-    gaugePollInterval: 60000,     // Metrics polling interval in ms
-  },
+  logLevel: 'info',               // Tracing log level
+  logFormat: 'pretty',            // 'pretty' or 'json'
+  serviceName: 'my-service',      // Service name for tracing metadata
+  serviceVersion: '1.0.0',        // Service version for tracing metadata
 });
 ```
+
+## Metrics
+
+Get a snapshot of runtime metrics (requires observability to be configured):
+
+```javascript
+const snapshot = runtime.metricsSnapshot();
+if (snapshot) {
+  console.log(`Orchestrations started: ${snapshot.orchStarts}`);
+  console.log(`Orchestrations completed: ${snapshot.orchCompletions}`);
+  console.log(`Activity successes: ${snapshot.activitySuccess}`);
+  console.log(`Provider errors: ${snapshot.providerErrors}`);
+}
+```
+
+Returns `null` if observability is not enabled. The snapshot includes counters for orchestration starts/completions/failures, activity results, dispatcher stats, and provider errors.
 
 ## Client Operations
 

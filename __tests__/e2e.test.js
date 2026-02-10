@@ -674,6 +674,53 @@ describe('stop and resume (signal)', () => {
 
 // ─── 20. SQLite Smoketest ────────────────────────────────────────
 
+describe('get_client from activity', () => {
+  it('activity can use getClient to start a new orchestration', async () => {
+    const result = await runOrchestration('ClientFromActivity', 'trigger', (rt) => {
+      rt.registerActivity('SpawnChild', async (ctx, input) => {
+        const client = ctx.getClient();
+        await client.startOrchestration(`child-${ctx.instanceId}`, 'SimpleChild', input);
+        const childResult = await client.waitForOrchestration(`child-${ctx.instanceId}`);
+        return childResult.output;
+      });
+      rt.registerOrchestration('SimpleChild', function* (ctx, input) {
+        return `child-got-${input}`;
+      });
+      rt.registerOrchestration('ClientFromActivity', function* (ctx, input) {
+        return yield ctx.scheduleActivity('SpawnChild', input);
+      });
+    });
+    assert.strictEqual(result.status, 'Completed');
+    assert.strictEqual(result.output, 'child-got-trigger');
+  });
+});
+
+describe('metrics snapshot', () => {
+  it('runtime exposes metrics snapshot after processing', async () => {
+    const client = new Client(provider);
+    const runtime = new Runtime(provider, { dispatcherPollIntervalMs: 50 });
+    runtime.registerActivity('Echo', async (ctx, input) => input);
+    runtime.registerOrchestration('MetricsTest', function* (ctx, input) {
+      return yield ctx.scheduleActivity('Echo', input);
+    });
+    await runtime.start();
+    try {
+      const id = uid('metrics');
+      await client.startOrchestration(id, 'MetricsTest', 'hello');
+      await client.waitForOrchestration(id);
+      const snapshot = runtime.metricsSnapshot();
+      assert.ok(snapshot, 'metrics snapshot should be available');
+      assert.ok(snapshot.orchStarts >= 1, `expected at least 1 orch start, got ${snapshot.orchStarts}`);
+      assert.ok(snapshot.orchCompletions >= 1, `expected at least 1 completion, got ${snapshot.orchCompletions}`);
+      assert.ok(snapshot.activitySuccess >= 1, `expected at least 1 activity success, got ${snapshot.activitySuccess}`);
+    } finally {
+      await runtime.shutdown(100);
+    }
+  });
+});
+
+// ─── 21. SQLite Smoketest ────────────────────────────────────────
+
 describe('sqlite smoketest', () => {
   it('runs a basic orchestration on SQLite', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duroxide-smoke-'));

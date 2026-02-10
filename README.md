@@ -15,8 +15,10 @@ Node.js/TypeScript SDK for the [Duroxide](https://github.com/affandar/duroxide) 
 - **Fan-out/fan-in** — run tasks in parallel with `ctx.all()` (supports all task types)
 - **Race conditions** — wait for the first of multiple tasks with `ctx.race()` (supports all task types)
 - **Cooperative cancellation** — activities detect when they're no longer needed via `ctx.isCancelled()`
+- **Activity client access** — activities can start new orchestrations via `ctx.getClient()`
 - **Continue-as-new** — restart orchestrations with fresh history for eternal workflows
 - **Structured tracing** — orchestration and activity logs route through Rust's `tracing` crate
+- **Runtime metrics** — `metricsSnapshot()` for orchestration/activity counters
 - **SQLite & PostgreSQL** — pluggable storage backends
 
 ## Quick Start
@@ -146,11 +148,11 @@ RUST_LOG=duroxide::activity=info node app.js  # Activity traces only
 Requires PostgreSQL (see `.env.example`):
 
 ```bash
-npm test                 # e2e tests (23 PG + 1 SQLite smoketest)
+npm test                 # e2e tests (25 PG + 1 SQLite smoketest)
 npm run test:races       # Race/join composition tests (7 tests)
 npm run test:admin       # Admin API tests (14 tests)
 npm run test:scenarios   # Scenario tests (6 tests)
-npm run test:all         # Everything (50 tests)
+npm run test:all         # Everything (52 tests)
 ```
 
 ## License

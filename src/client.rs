@@ -23,6 +23,10 @@ pub struct JsClient {
 
 #[napi]
 impl JsClient {
+    pub(crate) fn from_client(client: Client) -> Self {
+        Self { inner: client }
+    }
+
     #[napi(constructor)]
     pub fn new(provider: &JsSqliteProvider) -> Self {
         let p: Arc<dyn duroxide::providers::Provider> = provider.inner.clone();

@@ -37,3 +37,9 @@ pub fn orchestration_trace_log(instance_id: String, level: String, message: Stri
 pub fn activity_is_cancelled(token: String) -> bool {
     handlers::activity_is_cancelled(&token)
 }
+
+/// Get a Client from an activity context, allowing activities to start new orchestrations.
+#[napi_derive::napi]
+pub fn activity_get_client(token: String) -> Option<JsClient> {
+    handlers::activity_get_client(&token)
+}
