@@ -7,7 +7,10 @@
   "napi": {
     "name": "duroxide",
     "triples": {
-      "defaults": true
+      "defaults": true,
+      "additional": [
+        "aarch64-apple-darwin"
+      ]
     }
   },
   "scripts": {
@@ -29,6 +32,12 @@
   "license": "MIT",
   "engines": {
     "node": ">= 18"
+  },
+  "optionalDependencies": {
+    "duroxide-win32-x64-msvc": "0.1.0",
+    "duroxide-darwin-x64": "0.1.0",
+    "duroxide-linux-x64-gnu": "0.1.0",
+    "duroxide-darwin-arm64": "0.1.0"
   },
   "files": [
     "index.js",
