@@ -210,6 +210,11 @@ export declare class JsRuntime {
    * This is async and takes &mut self. napi-rs requires async &mut methods to be marked unsafe.
    */
   start(): Promise<void>
-  /** Shutdown the runtime gracefully. */
+  /**
+   * Shutdown the runtime gracefully.
+   *
+   * # Safety
+   * Must not be called concurrently from multiple threads.
+   */
   shutdown(timeoutMs?: number | undefined | null): Promise<void>
 }
