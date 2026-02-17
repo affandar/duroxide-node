@@ -1,0 +1,94 @@
+name: Build & Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # ── Build native binaries ──────────────────────────────────
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: darwin-arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            platform: darwin-x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x64-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: win32-x64-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npx napi build --platform --release --target ${{ matrix.target }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: duroxide.*.node
+          if-no-files-found: error
+
+  # ── Publish to npm ─────────────────────────────────────────
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Install dependencies
+        run: npm ci
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+      - name: List binaries
+        run: ls -lh *.node
+      - name: Move binaries to platform packages
+        run: npx napi artifacts
+      - name: List platform packages
+        run: |
+          for dir in npm/npm/*/; do
+            echo "=== $(basename $dir) ==="
+            ls -lh "$dir"
+          done
+      - name: Publish platform packages
+        run: |
+          for dir in npm/npm/*/; do
+            pkg=$(basename "$dir")
+            echo "Publishing duroxide-$pkg..."
+            (cd "$dir" && npm publish --access public) || true
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish main package
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
