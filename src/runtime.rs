@@ -35,6 +35,12 @@ pub struct JsRuntimeOptions {
     pub service_name: Option<String>,
     /// Optional service version
     pub service_version: Option<String>,
+    /// Maximum concurrent sessions per runtime (default: 10)
+    pub max_sessions_per_runtime: Option<i32>,
+    /// Session idle timeout in ms (default: 300000 = 5 minutes)
+    pub session_idle_timeout_ms: Option<i64>,
+    /// Stable worker identity for session ownership (e.g., K8s pod name)
+    pub worker_node_id: Option<String>,
 }
 
 /// Builder for the duroxide runtime, wrapping registration and startup.
@@ -201,6 +207,15 @@ impl JsRuntime {
             }
             if let Some(ref ver) = opts.service_version {
                 rt_options.observability.service_version = Some(ver.clone());
+            }
+            if let Some(max) = opts.max_sessions_per_runtime {
+                rt_options.max_sessions_per_runtime = max as usize;
+            }
+            if let Some(ms) = opts.session_idle_timeout_ms {
+                rt_options.session_idle_timeout = Duration::from_millis(ms as u64);
+            }
+            if let Some(ref nid) = opts.worker_node_id {
+                rt_options.worker_node_id = Some(nid.clone());
             }
         }
 

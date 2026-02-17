@@ -7,12 +7,23 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type")]
 pub enum ScheduledTask {
     #[serde(rename = "activity")]
-    Activity { name: String, input: String },
+    Activity {
+        name: String,
+        input: String,
+        #[serde(rename = "sessionId")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        session_id: Option<String>,
+    },
     #[serde(rename = "activityWithRetry")]
     ActivityWithRetry {
         name: String,
         input: String,
         retry: RetryPolicyConfig,
+        #[serde(rename = "sessionId")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        session_id: Option<String>,
     },
     #[serde(rename = "timer")]
     Timer {

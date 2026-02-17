@@ -282,6 +282,46 @@ runtime.registerActivity('ValidateInput', async (ctx, input) => {
 });
 ```
 
+## Activity Sessions
+
+Sessions provide worker affinity — all activities scheduled with the same `sessionId` are routed to the same worker. This is useful for stateful activities that need local caches, connections, or locks.
+
+### Schedule Activity on Session
+
+```javascript
+runtime.registerOrchestration('GameTurn', function* (ctx) {
+  const sessionId = yield ctx.newGuid(); // deterministic session ID
+  const r1 = yield ctx.scheduleActivityOnSession('RunTurn', { turn: 1 }, sessionId);
+  const r2 = yield ctx.scheduleActivityOnSession('RunTurn', { turn: 2 }, sessionId);
+  return { r1, r2 }; // both ran on the same worker
+});
+```
+
+You can also pass `sessionId` as an option to `scheduleActivity`:
+
+```javascript
+const r = yield ctx.scheduleActivity('RunTurn', { turn: 1 }, { sessionId: 'my-session' });
+```
+
+### Reading Session ID in Activities
+
+```javascript
+runtime.registerActivity('RunTurn', async (ctx, input) => {
+  ctx.traceInfo(`session: ${ctx.sessionId}`); // null for regular activities
+  return `turn-${input.turn}`;
+});
+```
+
+### Session Runtime Options
+
+```javascript
+const runtime = new Runtime(provider, {
+  maxSessionsPerRuntime: 10,           // Max concurrent sessions (default: 10)
+  sessionIdleTimeoutMs: 300_000,       // Session unpin after idle (default: 5 min)
+  workerNodeId: 'pod-name',            // Stable identity for session ownership
+});
+```
+
 ## Tracing
 
 ### Orchestration Tracing
@@ -362,6 +402,9 @@ const runtime = new Runtime(provider, {
   logFormat: 'pretty',            // 'pretty' or 'json'
   serviceName: 'my-service',      // Service name for tracing metadata
   serviceVersion: '1.0.0',        // Service version for tracing metadata
+  maxSessionsPerRuntime: 10,      // Max concurrent sessions per runtime
+  sessionIdleTimeoutMs: 300_000,  // Session idle timeout in ms (5 min)
+  workerNodeId: 'pod-1',          // Stable worker identity for sessions
 });
 ```
 

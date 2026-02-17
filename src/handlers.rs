@@ -144,6 +144,7 @@ impl JsActivityHandler {
             "orchestrationVersion": ctx.orchestration_version(),
             "activityName": ctx.activity_name(),
             "workerId": ctx.worker_id(),
+            "sessionId": ctx.session_id(),
             "_traceToken": token,
         });
 
@@ -260,13 +261,18 @@ impl JsOrchestrationHandler {
         task: ScheduledTask,
     ) -> TaskResult {
         match task {
-            ScheduledTask::Activity { name, input } => {
-                match ctx.schedule_activity(&name, input).await {
+            ScheduledTask::Activity { name, input, session_id } => {
+                let result = if let Some(sid) = session_id {
+                    ctx.schedule_activity_on_session(&name, input, sid).await
+                } else {
+                    ctx.schedule_activity(&name, input).await
+                };
+                match result {
                     Ok(val) => TaskResult::Ok(val),
                     Err(err) => TaskResult::Err(err),
                 }
             }
-            ScheduledTask::ActivityWithRetry { name, input, retry } => {
+            ScheduledTask::ActivityWithRetry { name, input, retry, session_id: _session_id } => {
                 let policy = convert_retry_policy(&retry);
                 match ctx.schedule_activity_with_retry(&name, input, policy).await {
                     Ok(val) => TaskResult::Ok(val),
@@ -442,15 +448,20 @@ fn make_select_future(
     task: ScheduledTask,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send + '_>> {
     match task {
-        ScheduledTask::Activity { name, input } => {
+        ScheduledTask::Activity { name, input, session_id } => {
             Box::pin(async move {
-                match ctx.schedule_activity(&name, input).await {
+                let result = if let Some(sid) = session_id {
+                    ctx.schedule_activity_on_session(&name, input, sid).await
+                } else {
+                    ctx.schedule_activity(&name, input).await
+                };
+                match result {
                     Ok(v) => v,
                     Err(e) => e,
                 }
             })
         }
-        ScheduledTask::ActivityWithRetry { name, input, retry } => {
+        ScheduledTask::ActivityWithRetry { name, input, retry, session_id: _session_id } => {
             Box::pin(async move {
                 let policy = convert_retry_policy(&retry);
                 match ctx.schedule_activity_with_retry(&name, input, policy).await {
@@ -513,15 +524,20 @@ fn make_join_future(
     task: ScheduledTask,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send + '_>> {
     match task {
-        ScheduledTask::Activity { name, input } => {
+        ScheduledTask::Activity { name, input, session_id } => {
             Box::pin(async move {
-                match ctx.schedule_activity(&name, input).await {
+                let result = if let Some(sid) = session_id {
+                    ctx.schedule_activity_on_session(&name, input, sid).await
+                } else {
+                    ctx.schedule_activity(&name, input).await
+                };
+                match result {
                     Ok(v) => serde_json::json!({ "ok": v }).to_string(),
                     Err(e) => serde_json::json!({ "err": e }).to_string(),
                 }
             })
         }
-        ScheduledTask::ActivityWithRetry { name, input, retry } => {
+        ScheduledTask::ActivityWithRetry { name, input, retry, session_id: _session_id } => {
             Box::pin(async move {
                 let policy = convert_retry_policy(&retry);
                 match ctx.schedule_activity_with_retry(&name, input, policy).await {

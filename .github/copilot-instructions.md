@@ -25,6 +25,7 @@ src/pg_provider.rs       ← JsPostgresProvider
 __tests__/e2e.test.js    ← PostgreSQL e2e tests (24 tests + 1 SQLite smoketest)
 __tests__/races.test.js  ← ctx.all() and ctx.race() with mixed task types + cancellation (7 tests)
 __tests__/admin_api.test.js ← Admin/management API tests (14 tests)
+__tests__/sessions.test.js ← Session support tests (6 tests, SQLite in-memory)
 __tests__/scenarios/     ← Scenario tests modeling real-world patterns (toygres, 6 tests)
 ```
 
@@ -75,7 +76,8 @@ npm test                               # PostgreSQL e2e (24 tests + 1 SQLite smo
 npm run test:races                     # Race/join composition tests (7 tests, needs DATABASE_URL)
 npm run test:admin                     # Admin API tests (14 tests, needs DATABASE_URL)
 npm run test:scenarios                 # Scenario tests (6 tests, needs DATABASE_URL)
-npm run test:all                       # Everything (52 tests)
+npm run test:sessions                  # Session tests (6 tests, SQLite in-memory)
+npm run test:all                       # Everything (58 tests)
 
 # Lint the Rust side
 cargo clippy --all-targets
@@ -104,6 +106,7 @@ The JS generator yields plain objects that map to Rust `ScheduledTask` variants:
 | JS Descriptor | Rust Variant | Notes |
 |--------------|-------------|-------|
 | `{ type: 'activity', name, input }` | `Activity` | Runs an activity |
+| `{ type: 'activity', name, input, sessionId }` | `Activity` | Runs an activity on a session |
 | `{ type: 'activityWithRetry', name, input, retryPolicy }` | `ActivityWithRetry` | With retry policy |
 | `{ type: 'timer', delayMs }` | `Timer` | Durable delay |
 | `{ type: 'wait', eventName }` | `WaitEvent` | Wait for external event |

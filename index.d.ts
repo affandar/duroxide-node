@@ -24,6 +24,12 @@ export interface JsRuntimeOptions {
   serviceName?: string
   /** Optional service version */
   serviceVersion?: string
+  /** Maximum concurrent sessions per runtime (default: 10) */
+  maxSessionsPerRuntime?: number
+  /** Session idle timeout in ms (default: 300000 = 5 minutes) */
+  sessionIdleTimeoutMs?: number
+  /** Stable worker identity for session ownership (e.g., K8s pod name) */
+  workerNodeId?: string
 }
 /** Orchestration status returned to JS. */
 export interface JsOrchestrationStatus {
