@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-02-20
+
+### Added
+- **Custom Status API**: `ctx.setCustomStatus(status)` and `ctx.resetCustomStatus()` — set/clear custom status from orchestrations (fire-and-forget, no yield needed)
+- **Custom Status on OrchestrationStatus**: `customStatus` and `customStatusVersion` fields on status objects returned by `getStatus()`, `waitForOrchestration()`, etc.
+- **Custom Status Polling**: `client.waitForStatusChange(instanceId, lastSeenVersion, pollIntervalMs, timeoutMs)` — poll for custom status changes
+- **Event Queue API (Context)**: `ctx.dequeueEvent(queueName)` — dequeue from a named FIFO mailbox (survives continue-as-new)
+- **Event Queue API (Client)**: `client.enqueueEvent(instanceId, queueName, data)` — enqueue to an instance's event queue
+- **Retry with Session**: `ctx.scheduleActivityWithRetryOnSession(name, input, retry, sessionId)` — retry with session affinity
+- `scheduleActivityWithRetry` now respects `sessionId` when present
+- EventKind support for `QueueSubscribed`, `QueueEventDelivered`, `QueueSubscriptionCancelled`
+
+### Changed
+- Upgraded duroxide to 0.1.19, duroxide-pg to 0.1.21
+
+### Deprecated
+- `client.raiseEvent()` for persistent messaging — use `client.enqueueEvent()` instead
+- `ctx.waitForEvent()` for persistent subscriptions — use `ctx.dequeueEvent()` instead
+
 ## [0.1.5] - 2026-02-13
 
 ### Added

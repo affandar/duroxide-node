@@ -117,6 +117,22 @@ pub fn orchestration_trace(instance_id: &str, level: &str, message: &str) {
     }
 }
 
+/// Called from JS to set custom status on the OrchestrationContext.
+pub fn orchestration_set_custom_status(instance_id: &str, status: &str) {
+    let map = ORCHESTRATION_CTXS.lock().unwrap();
+    if let Some(ctx) = map.get(instance_id) {
+        ctx.set_custom_status(status);
+    }
+}
+
+/// Called from JS to reset (clear) custom status on the OrchestrationContext.
+pub fn orchestration_reset_custom_status(instance_id: &str) {
+    let map = ORCHESTRATION_CTXS.lock().unwrap();
+    if let Some(ctx) = map.get(instance_id) {
+        ctx.reset_custom_status();
+    }
+}
+
 // ─── Activity Bridge ─────────────────────────────────────────────
 
 /// Wraps a JS async function as a Rust ActivityHandler.
@@ -272,9 +288,14 @@ impl JsOrchestrationHandler {
                     Err(err) => TaskResult::Err(err),
                 }
             }
-            ScheduledTask::ActivityWithRetry { name, input, retry, session_id: _session_id } => {
+            ScheduledTask::ActivityWithRetry { name, input, retry, session_id } => {
                 let policy = convert_retry_policy(&retry);
-                match ctx.schedule_activity_with_retry(&name, input, policy).await {
+                let result = if let Some(sid) = session_id {
+                    ctx.schedule_activity_with_retry_on_session(&name, input, policy, sid).await
+                } else {
+                    ctx.schedule_activity_with_retry(&name, input, policy).await
+                };
+                match result {
                     Ok(val) => TaskResult::Ok(val),
                     Err(err) => TaskResult::Err(err),
                 }
@@ -363,6 +384,10 @@ impl JsOrchestrationHandler {
                     Ok(_) => TaskResult::Ok("null".to_string()),
                     Err(e) => TaskResult::Err(e),
                 }
+            }
+            ScheduledTask::DequeueEvent { queue_name } => {
+                let data = ctx.dequeue_event(&queue_name).await;
+                TaskResult::Ok(data)
             }
             ScheduledTask::Join { tasks } => {
                 // Reject nested join/select — recursive async requires Pin<Box> gymnastics
@@ -461,10 +486,15 @@ fn make_select_future(
                 }
             })
         }
-        ScheduledTask::ActivityWithRetry { name, input, retry, session_id: _session_id } => {
+        ScheduledTask::ActivityWithRetry { name, input, retry, session_id } => {
             Box::pin(async move {
                 let policy = convert_retry_policy(&retry);
-                match ctx.schedule_activity_with_retry(&name, input, policy).await {
+                let result = if let Some(sid) = session_id {
+                    ctx.schedule_activity_with_retry_on_session(&name, input, policy, sid).await
+                } else {
+                    ctx.schedule_activity_with_retry(&name, input, policy).await
+                };
+                match result {
                     Ok(v) => v,
                     Err(e) => e,
                 }
@@ -479,6 +509,11 @@ fn make_select_future(
         ScheduledTask::WaitEvent { name } => {
             Box::pin(async move {
                 ctx.schedule_wait(&name).await
+            })
+        }
+        ScheduledTask::DequeueEvent { queue_name } => {
+            Box::pin(async move {
+                ctx.dequeue_event(&queue_name).await
             })
         }
         ScheduledTask::SubOrchestration { name, input } => {
@@ -537,10 +572,15 @@ fn make_join_future(
                 }
             })
         }
-        ScheduledTask::ActivityWithRetry { name, input, retry, session_id: _session_id } => {
+        ScheduledTask::ActivityWithRetry { name, input, retry, session_id } => {
             Box::pin(async move {
                 let policy = convert_retry_policy(&retry);
-                match ctx.schedule_activity_with_retry(&name, input, policy).await {
+                let result = if let Some(sid) = session_id {
+                    ctx.schedule_activity_with_retry_on_session(&name, input, policy, sid).await
+                } else {
+                    ctx.schedule_activity_with_retry(&name, input, policy).await
+                };
+                match result {
                     Ok(v) => serde_json::json!({ "ok": v }).to_string(),
                     Err(e) => serde_json::json!({ "err": e }).to_string(),
                 }
@@ -555,6 +595,12 @@ fn make_join_future(
         ScheduledTask::WaitEvent { name } => {
             Box::pin(async move {
                 let data = ctx.schedule_wait(&name).await;
+                serde_json::json!({ "ok": data }).to_string()
+            })
+        }
+        ScheduledTask::DequeueEvent { queue_name } => {
+            Box::pin(async move {
+                let data = ctx.dequeue_event(&queue_name).await;
                 serde_json::json!({ "ok": data }).to_string()
             })
         }

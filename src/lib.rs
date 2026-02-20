@@ -44,6 +44,18 @@ pub fn activity_get_client(token: String) -> Option<JsClient> {
     handlers::activity_get_client(&token)
 }
 
+/// Set custom status on an orchestration context (fire-and-forget, no yield needed).
+#[napi_derive::napi]
+pub fn orchestration_set_custom_status(instance_id: String, status: String) {
+    handlers::orchestration_set_custom_status(&instance_id, &status);
+}
+
+/// Reset (clear) custom status on an orchestration context (fire-and-forget, no yield needed).
+#[napi_derive::napi]
+pub fn orchestration_reset_custom_status(instance_id: String) {
+    handlers::orchestration_reset_custom_status(&instance_id);
+}
+
 /// Options for `initTracing`. Call before `runtime.start()` to direct
 /// Rust tracing output to a file instead of stdout.
 #[napi_derive::napi(object)]

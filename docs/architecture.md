@@ -253,6 +253,60 @@ duroxide = { path = "../duroxide" }
 
 This forces all transitive dependencies to use the local duroxide.
 
+## Custom Status Data Path
+
+Custom status is a fire-and-forget mechanism — orchestrations set progress strings that external clients can poll. No `yield` is needed because the status write is handled synchronously via the global `ORCHESTRATION_CTXS` map, similar to tracing.
+
+```
+Orchestration: ctx.setCustomStatus(str)
+  │
+  └─► orchestrationSetCustomStatus(instanceId, str)  [napi function]
+        │
+        └─► ORCHESTRATION_CTXS.get(instanceId).set_custom_status(str)
+              │
+              └─► Writes to provider (customStatusVersion increments monotonically)
+
+Client: client.waitForStatusChange(id, lastVer, pollMs, timeoutMs)
+  │
+  └─► JsClient.waitForStatusChange(id, lastVer, pollMs, timeoutMs)  [napi async]
+        │
+        └─► Polls provider until customStatusVersion > lastVer
+              │
+              ├─ Changed → return { customStatus, customStatusVersion }
+              └─ Timeout → return null
+```
+
+`ctx.resetCustomStatus()` sets the status back to null (also fire-and-forget, also increments the version).
+
+## Event Queue Flow
+
+Event queues provide persistent FIFO message passing between clients and orchestrations. Unlike `waitForEvent` (which is a one-shot signal), event queues are durable mailboxes that survive `continueAsNew`.
+
+```
+Client: client.enqueueEvent(instanceId, queueName, data)
+  │
+  └─► JsClient.enqueueEvent(id, queue, data)  [napi async]
+        │
+        └─► Provider: insert into event queue table (FIFO order preserved)
+
+Orchestration: yield ctx.dequeueEvent(queueName)
+  │
+  └─► Generator yields { type: 'dequeueEvent', queueName }
+        │
+        └─► Rust execute_task() → ctx.dequeue_event(queueName)
+              │
+              ├─ Message available → returns data immediately
+              └─ No message → DurableFuture blocks until enqueued
+                    │
+                    └─ On replay: returns cached result
+```
+
+Key properties:
+- **FIFO ordering** — messages are delivered in the order they were enqueued
+- **Survives continue-as-new** — queue state persists across orchestration restarts
+- **Blocks until available** — `dequeueEvent` suspends the orchestration until a message arrives
+- **One consumer** — each message is delivered to exactly one `dequeueEvent` call
+
 ## Limitations
 
 ### No Parallel Orchestration Steps Without yield

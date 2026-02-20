@@ -78,6 +78,11 @@ pub enum ScheduledTask {
     ContinueAsNew { input: String },
     #[serde(rename = "continueAsNewVersioned")]
     ContinueAsNewVersioned { input: String, version: Option<String> },
+    #[serde(rename = "dequeueEvent")]
+    DequeueEvent {
+        #[serde(rename = "queueName")]
+        queue_name: String,
+    },
     #[serde(rename = "join")]
     Join { tasks: Vec<ScheduledTask> },
     #[serde(rename = "select")]
@@ -118,6 +123,8 @@ pub struct JsOrchestrationStatus {
     pub status: String,
     pub output: Option<String>,
     pub error: Option<String>,
+    pub custom_status: Option<String>,
+    pub custom_status_version: i64,
 }
 
 /// System metrics returned to JS.

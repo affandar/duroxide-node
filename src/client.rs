@@ -61,6 +61,17 @@ fn extract_event_data(kind: &duroxide::EventKind) -> Option<String> {
         duroxide::EventKind::SubOrchestrationFailed { details } => {
             serde_json::to_string(details).ok()
         }
+        duroxide::EventKind::QueueSubscribed { name } => {
+            Some(format!(r#"{{"name":{}}}"#, serde_json::to_string(name).unwrap_or_default()))
+        }
+        duroxide::EventKind::QueueEventDelivered { name, data } => {
+            Some(format!(r#"{{"name":{},"data":{}}}"#,
+                serde_json::to_string(name).unwrap_or_default(),
+                data))
+        }
+        duroxide::EventKind::QueueSubscriptionCancelled { reason } => {
+            Some(format!(r#"{{"reason":{}}}"#, serde_json::to_string(reason).unwrap_or_default()))
+        }
         _ => None,
     }
 }
@@ -414,6 +425,42 @@ impl JsClient {
             events_deleted: result.events_deleted as i64,
         })
     }
+
+    /// Enqueue an event to a named queue on an orchestration instance.
+    #[napi]
+    pub async fn enqueue_event(
+        &self,
+        instance_id: String,
+        queue_name: String,
+        data: String,
+    ) -> Result<()> {
+        self.inner
+            .enqueue_event(&instance_id, &queue_name, data)
+            .await
+            .map_err(|e| Error::from_reason(format!("{e}")))
+    }
+
+    /// Wait for the custom status version to change on an orchestration instance.
+    #[napi]
+    pub async fn wait_for_status_change(
+        &self,
+        instance_id: String,
+        last_seen_version: i64,
+        poll_interval_ms: i64,
+        timeout_ms: i64,
+    ) -> Result<JsOrchestrationStatus> {
+        let status = self
+            .inner
+            .wait_for_status_change(
+                &instance_id,
+                last_seen_version as u64,
+                Duration::from_millis(poll_interval_ms as u64),
+                Duration::from_millis(timeout_ms as u64),
+            )
+            .await
+            .map_err(|e| Error::from_reason(format!("{e}")))?;
+        Ok(convert_status(status))
+    }
 }
 
 fn convert_status(status: OrchestrationStatus) -> JsOrchestrationStatus {
@@ -422,21 +469,29 @@ fn convert_status(status: OrchestrationStatus) -> JsOrchestrationStatus {
             status: "NotFound".to_string(),
             output: None,
             error: None,
+            custom_status: None,
+            custom_status_version: 0,
         },
-        OrchestrationStatus::Running => JsOrchestrationStatus {
+        OrchestrationStatus::Running { custom_status, custom_status_version } => JsOrchestrationStatus {
             status: "Running".to_string(),
             output: None,
             error: None,
+            custom_status,
+            custom_status_version: custom_status_version as i64,
         },
-        OrchestrationStatus::Completed { output } => JsOrchestrationStatus {
+        OrchestrationStatus::Completed { output, custom_status, custom_status_version } => JsOrchestrationStatus {
             status: "Completed".to_string(),
             output: Some(output),
             error: None,
+            custom_status,
+            custom_status_version: custom_status_version as i64,
         },
-        OrchestrationStatus::Failed { details } => JsOrchestrationStatus {
+        OrchestrationStatus::Failed { details, custom_status, custom_status_version } => JsOrchestrationStatus {
             status: "Failed".to_string(),
             output: None,
             error: Some(details.display_message()),
+            custom_status,
+            custom_status_version: custom_status_version as i64,
         },
     }
 }

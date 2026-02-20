@@ -241,6 +241,113 @@ const result = yield ctx.scheduleActivityWithRetry('FlakeyApi', input, {
 });
 ```
 
+### Custom Status — Progress Reporting
+
+Set progress visible to external clients. Fire-and-forget — no `yield` needed:
+
+```javascript
+runtime.registerOrchestration('LongProcess', function* (ctx, input) {
+  ctx.setCustomStatus('step 1: validating');
+  yield ctx.scheduleActivity('Validate', input);
+
+  ctx.setCustomStatus('step 2: processing');
+  const result = yield ctx.scheduleActivity('Process', input);
+
+  ctx.setCustomStatus('step 3: complete');
+  return result;
+});
+
+// Client-side: poll for progress
+let lastVersion = 0;
+while (true) {
+  const change = await client.waitForStatusChange(instanceId, lastVersion, 100, 30000);
+  if (!change) break; // timeout — orchestration probably completed
+  console.log(`Progress: ${change.customStatus}`);
+  lastVersion = change.customStatusVersion;
+}
+```
+
+Use `ctx.resetCustomStatus()` to clear the status back to null.
+
+The `customStatus` and `customStatusVersion` fields are also available on the status object returned by `getOrchestrationStatus()` and `waitForOrchestration()`.
+
+### Event Queues — Persistent FIFO Messaging
+
+Event queues provide durable, ordered message passing. Unlike `waitForEvent` (one-shot), queues are persistent mailboxes that survive `continueAsNew`:
+
+```javascript
+runtime.registerOrchestration('WorkProcessor', function* (ctx) {
+  // Block until a message arrives on the 'tasks' queue
+  const taskJson = yield ctx.dequeueEvent('tasks');
+  const task = JSON.parse(taskJson);
+
+  const result = yield ctx.scheduleActivity('ProcessTask', task);
+  ctx.setCustomStatus(JSON.stringify({ done: task.id, result }));
+
+  // Loop forever by restarting — queue state survives
+  return yield ctx.continueAsNew('');
+});
+
+// Send work from outside
+await client.enqueueEvent(instanceId, 'tasks', JSON.stringify({ id: 1, type: 'resize' }));
+await client.enqueueEvent(instanceId, 'tasks', JSON.stringify({ id: 2, type: 'compress' }));
+```
+
+Key properties:
+- **FIFO ordering** — messages delivered in enqueue order
+- **Survives continue-as-new** — queue state persists across restarts
+- **Blocks until available** — orchestration suspends until a message arrives
+
+### Retry with Session Affinity
+
+Pin all retry attempts to the same worker session:
+
+```javascript
+const result = yield ctx.scheduleActivityWithRetryOnSession(
+  'StatefulOperation',
+  input,
+  {
+    maxAttempts: 3,
+    backoff: 'exponential',
+    timeoutMs: 5000,
+    totalTimeoutMs: 30000,
+  },
+  sessionId
+);
+```
+
+This is useful when retry attempts should reuse local state (caches, connections, locks) that are pinned to a session.
+
+### Real-World Pattern: Multi-Turn Chat
+
+Combine event queues, custom status, and continue-as-new for a Copilot-style conversational agent:
+
+```javascript
+runtime.registerOrchestration('ChatBot', function* (ctx) {
+  // Wait for the next user message
+  const msgJson = yield ctx.dequeueEvent('inbox');
+  const msg = JSON.parse(msgJson);
+
+  // Generate a response
+  const response = yield ctx.scheduleActivity('Generate', msg.text);
+
+  // Publish the reply via custom status
+  ctx.setCustomStatus(JSON.stringify({ state: 'replied', response, seq: msg.seq }));
+
+  // End conversation on "bye"
+  if (msg.text.includes('bye')) return `Done after ${msg.seq} msgs`;
+
+  // Otherwise loop — queue state and status survive continue-as-new
+  return yield ctx.continueAsNew('');
+});
+
+// Client side: send a message and wait for the reply
+await client.enqueueEvent(instanceId, 'inbox', JSON.stringify({ seq: 1, text: 'Hello!' }));
+const status = await client.waitForStatusChange(instanceId, 0, 50, 10000);
+const reply = JSON.parse(status.customStatus);
+console.log(reply.response); // AI-generated reply
+```
+
 ## Activity Patterns
 
 ### Basic Activity
@@ -436,6 +543,8 @@ await client.startOrchestrationVersioned('id', 'WorkflowName', inputData, '1.0.2
 // Wait for completion (with timeout in ms)
 const status = await client.waitForOrchestration('id', 30000);
 // status.status: 'Completed' | 'Failed' | 'Running' | 'Terminated' | ...
+// status.customStatus: string | undefined — current custom status
+// status.customStatusVersion: number — monotonically increasing version counter
 
 // Cancel a running orchestration
 await client.cancelOrchestration('id');
@@ -445,6 +554,13 @@ await client.raiseEvent('id', 'eventName', eventData);
 
 // Get status without waiting
 const status = await client.getOrchestrationStatus('id');
+
+// Event queues
+await client.enqueueEvent('id', 'queueName', JSON.stringify(data));
+
+// Custom status polling
+const change = await client.waitForStatusChange('id', lastVersion, 100, 30000);
+// change: { customStatus, customStatusVersion } or null on timeout
 
 // Admin operations
 await client.deleteInstance('id', { force: false });

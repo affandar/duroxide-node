@@ -16,6 +16,8 @@ Node.js/TypeScript SDK for the [Duroxide](https://github.com/affandar/duroxide) 
 - **Race conditions** — wait for the first of multiple tasks with `ctx.race()` (supports all task types)
 - **Cooperative cancellation** — activities detect when they're no longer needed via `ctx.isCancelled()`
 - **Activity client access** — activities can start new orchestrations via `ctx.getClient()`
+- **Custom status** — set orchestration progress visible to external clients via `ctx.setCustomStatus()`
+- **Event queues** — persistent FIFO message passing with `ctx.dequeueEvent()` and `client.enqueueEvent()`
 - **Continue-as-new** — restart orchestrations with fresh history for eternal workflows
 - **Structured tracing** — orchestration and activity logs route through Rust's `tracing` crate
 - **Runtime metrics** — `metricsSnapshot()` for orchestration/activity counters
@@ -98,6 +100,8 @@ All scheduling methods return descriptors that must be **yielded**:
 | `yield ctx.race(task1, task2)` | First-to-complete (like `Promise.race`) |
 | `yield ctx.utcNow()` | Deterministic timestamp |
 | `yield ctx.newGuid()` | Deterministic GUID |
+| `yield ctx.dequeueEvent(queueName)` | Dequeue from persistent FIFO mailbox |
+| `yield ctx.scheduleActivityWithRetryOnSession(name, input, retry, sessionId)` | Retry with session affinity |
 | `yield ctx.continueAsNew(newInput)` | Restart with fresh history |
 
 Tracing methods are **fire-and-forget** (no yield needed):
@@ -108,6 +112,8 @@ Tracing methods are **fire-and-forget** (no yield needed):
 | `ctx.traceWarn(message)` | WARN log |
 | `ctx.traceError(message)` | ERROR log |
 | `ctx.traceDebug(message)` | DEBUG log |
+| `ctx.setCustomStatus(status)` | Set progress visible to clients |
+| `ctx.resetCustomStatus()` | Clear custom status |
 
 ## Storage Backends
 
@@ -144,6 +150,13 @@ The `Client` class includes a management API for inspecting and managing orchest
 
 ```javascript
 const client = new Client(provider);
+
+// Event queues
+await client.enqueueEvent(instanceId, 'queueName', JSON.stringify(data));
+
+// Custom status polling
+const change = await client.waitForStatusChange(instanceId, 0, 100, 30000);
+// change: { customStatus, customStatusVersion } or null on timeout
 
 // Instance management
 const instances = await client.listAllInstances();

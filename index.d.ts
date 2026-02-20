@@ -36,6 +36,8 @@ export interface JsOrchestrationStatus {
   status: string
   output?: string
   error?: string
+  customStatus?: string
+  customStatusVersion: number
 }
 /** System metrics returned to JS. */
 export interface JsSystemMetrics {
@@ -151,6 +153,10 @@ export declare function orchestrationTraceLog(instanceId: string, level: string,
 export declare function activityIsCancelled(token: string): boolean
 /** Get a Client from an activity context, allowing activities to start new orchestrations. */
 export declare function activityGetClient(token: string): JsClient | null
+/** Set custom status on an orchestration context (fire-and-forget, no yield needed). */
+export declare function orchestrationSetCustomStatus(instanceId: string, status: string): void
+/** Reset (clear) custom status on an orchestration context (fire-and-forget, no yield needed). */
+export declare function orchestrationResetCustomStatus(instanceId: string): void
 /**
  * Options for `initTracing`. Call before `runtime.start()` to direct
  * Rust tracing output to a file instead of stdout.
@@ -218,6 +224,10 @@ export declare class JsClient {
   pruneExecutions(instanceId: string, options: JsPruneOptions): Promise<JsPruneResult>
   /** Prune old executions from multiple instances matching a filter. */
   pruneExecutionsBulk(filter: JsInstanceFilter, options: JsPruneOptions): Promise<JsPruneResult>
+  /** Enqueue an event to a named queue on an orchestration instance. */
+  enqueueEvent(instanceId: string, queueName: string, data: string): Promise<void>
+  /** Wait for the custom status version to change on an orchestration instance. */
+  waitForStatusChange(instanceId: string, lastSeenVersion: number, pollIntervalMs: number, timeoutMs: number): Promise<JsOrchestrationStatus>
 }
 /** Wraps duroxide-pg's PostgresProvider for use from JavaScript. */
 export declare class JsPostgresProvider {
